@@ -2,7 +2,7 @@
 
 - **Date:** 2026-10-24
 - **Scope:** `GET /api/v1/route-plan/` (warm, compute, cold), `/route-plan/map/`, `/health/`, and the 400/422 error paths.
-- **Verdict:** ✅ Every endpoint kept serving correct results under sustained and spike load, across about **1.7M validated requests in two rounds with 0 incorrect responses**. Round 1 (sections 1–5) found and fixed two bottlenecks (ADR-0012). Round 2 (section 0) added corridor memoization, ETag/304 conditional GET and cached dataset-version reads (ADR-0013). Together they **raised per-node capacity at p95 160 ms from about 490 to about 900 RPS**, and the 2,000-user spike now completes with **0 errors**.
+- **Verdict:** ✅ Every endpoint kept serving correct results under sustained and spike load, across about **1.7M validated requests in two rounds with 0 incorrect responses**. Round 1 (sections 1–5) found and fixed two bottlenecks (ADR-0012). Round 2 (section 0) added corridor memoization, ETag/304 conditional GET and cached dataset-version reads (ADR-0013). Round 3 (section 0b) repeated the tests in Docker with Redis (ADR-0015). Together they **raised per-node capacity at p95 160 ms from about 490 to about 900 RPS**, and the 2,000-user spike now completes with **0 errors**.
 
 ## 0. Round 2: current numbers (default configuration, gzip on)
 
@@ -24,6 +24,20 @@ Same harness and host as round 1: gunicorn with 8 workers × 4 threads, fake OSR
 **Gzip trade-off.** Compression shrinks NYC→LA from 43.6 KB to 16.5 KB (2.6×) but costs about 23% of warm-path throughput (2,710 → 2,087 RPS) on localhost, where bandwidth is free. Over real networks the smaller payload usually wins. Behind a compressing proxy, set `GZIP_RESPONSES=0`.
 
 **Updated capacity planning.** One 8-worker node sustains about **850 RPS at p95 ≤ 160 ms** with a 20% compute mix (headroom below the ~900 RPS knee), so `nodes = ceil(target_rps / 850)`, plus one for N+1. Repeat traffic that revalidates with ETags is served at about 3× the rate of full 200 responses, with no body.
+
+## 0b. Round 3: the same tests in Docker (ADR-0015)
+
+Setup: `docker compose --profile loadtest` on a Docker Desktop VM with 11 vCPUs. The api runs 8 workers × 4 threads, the cache is **Redis (shared)**, and Locust runs in a container on the same network. All 13 baseline trips return their exact costs in the container.
+
+| Scenario | Requests | Failures | RPS | p95 | Native |
+|---|---|---|---|---|---|
+| Warm, 300 users | 90,012 | 0 | 1,997 | 260 ms | 2,087 |
+| Compute, 100 users | 10,951 | 0 | 243 | 980 ms | 290 |
+| Revalidation 304, 300 users | 396,667 | **0** | **8,806** | 58 ms | 6,289 |
+| Mixed, 100 users | 35,416 | 0 | 787 | 280 ms | 907 |
+| Spike: 2,000 users at 200/s | 52,689 | **0** | 877 | 3.5 s | 953 |
+
+Finding F5, fixed: gunicorn `max_requests = 20000` recycled each worker about every 18 s at 9k RPS and reset pooled keep-alive connections, giving 220 errors (0.05%). Recycling is now off by default, and RSS stayed flat. Memory is about 95 MB per worker (757 MB for 8), and the compose limit was raised to 1.5 GB and made configurable.
 
 # Round 1 (baseline and first fixes)
 

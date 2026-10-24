@@ -43,13 +43,14 @@ def build_handler(routes: dict[str, bytes], latency_s: float):
 
 def main() -> None:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--host", default="127.0.0.1", help="0.0.0.0 inside a container")
     parser.add_argument("--port", type=int, default=5001)
     parser.add_argument("--latency-ms", type=float, default=0)
     args = parser.parse_args()
 
     routes = {k: json.dumps(v).encode() for k, v in json.loads(gzip.decompress(FIXTURES.read_bytes())).items()}
     ThreadingHTTPServer.request_queue_size = 1024  # default backlog of 5 drops connections under load
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), build_handler(routes, args.latency_ms / 1000))
+    server = ThreadingHTTPServer((args.host, args.port), build_handler(routes, args.latency_ms / 1000))
     server.daemon_threads = True
     print(f"fake OSRM on :{args.port} with {len(routes)} routes, latency {args.latency_ms} ms", flush=True)
     server.serve_forever()

@@ -59,6 +59,15 @@ CACHES = {
         "TIMEOUT": 60 * 60 * 24,
     }
 }
+# Shared cache across workers and containers (docker-compose sets it). Keys are already
+# namespaced by dataset version, so a shared cache stays correct across reloads (ADR-0007).
+if REDIS_URL := os.environ.get("REDIS_URL"):
+    CACHES["default"] = {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache",
+        "LOCATION": REDIS_URL,
+        "TIMEOUT": 60 * 60 * 24,
+        "KEY_PREFIX": "fuel-route",
+    }
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 USE_TZ = True

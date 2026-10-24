@@ -32,7 +32,29 @@ GET /api/v1/route-plan/?start=New York, NY&finish=Los Angeles, CA
 - **Provably good stops.** An exact dynamic program picks the stops. It is cross-checked against the textbook optimal greedy algorithm on randomized routes.
 - **Hexagonal architecture, enforced.** The domain and the use case are framework-free behind `typing.Protocol` ports, and a fitness test fails CI if a layer imports the wrong thing. Every significant decision has an ADR: see [Architecture](#architecture-and-decisions).
 
-## Quick start
+## Run with Docker
+
+```bash
+docker compose up --build          # API on http://localhost:8000, Redis as shared cache
+```
+
+```bash
+curl "http://localhost:8000/api/v1/route-plan/?start=Chicago,%20IL&finish=Denver,%20CO"
+```
+
+The image is multi-stage, non-root, read-only and immutable. The price data is baked in at build time, and a health check is included. Settings come from environment variables: `WEB_CONCURRENCY` (default 4), `OSRM_URL`, `GZIP_RESPONSES`, `API_MEMORY_LIMIT`, `DJANGO_SECRET_KEY` and the others listed under Configuration. Load test the container without touching public APIs:
+
+```bash
+uv run python loadtest/record_osrm.py      # once, records 13 real routes
+```
+
+```bash
+OSRM_URL=http://fake-osrm:5001 WEB_CONCURRENCY=8 docker compose --profile loadtest up --build
+```
+
+Then open http://localhost:8089 for the Locust UI, with the host preset to the API. Details are in [ADR-0015](docs/adr/0015-containerization.md).
+
+## Quick start (without Docker)
 
 Requires Python 3.12+ and [uv](https://docs.astral.sh/uv/). With plain pip, use `pip install -r requirements.txt`.
 
@@ -155,7 +177,7 @@ Across about 1.7M validated requests there were 0 incorrect responses. Reproduce
 
 - [`docs/architecture.md`](docs/architecture.md): quality goals, C4 context, container and component views, a sequence diagram, the design-pattern catalogue, the data model and the risk register.
 - [`docs/load-test-report.md`](docs/load-test-report.md): load and stress test results, the bottlenecks found and fixed, and capacity planning.
-- [`docs/adr/`](docs/adr/0001-record-architecture-decisions.md): 14 Architecture Decision Records in MADR format. Each lists the options considered, the consequences, how the decision is confirmed in tests, and when to revisit it.
+- [`docs/adr/`](docs/adr/0001-record-architecture-decisions.md): 15 Architecture Decision Records in MADR format. Each lists the options considered, the consequences, how the decision is confirmed in tests, and when to revisit it.
 
 | ADR | Decision |
 |---|---|
@@ -172,6 +194,7 @@ Across about 1.7M validated requests there were 0 incorrect responses. Reproduce
 | [0012](docs/adr/0012-performance-under-load.md) | Performance under load: precomputed geometry, single-flight caches, edge load shedding |
 | [0013](docs/adr/0013-corridor-memo-and-http-caching.md) | Corridor memoization, ETag/304 conditional GET, configurable gzip |
 | [0014](docs/adr/0014-us-boundary-polygon.md) | "Inside the USA" checked against the Census boundary polygon |
+| [0015](docs/adr/0015-containerization.md) | Immutable multi-stage image with baked data; compose with Redis and a load-test profile |
 
 Design patterns used, each only where it earns its place:
 
@@ -215,14 +238,15 @@ scripts/                        reproducible data builders (not used at runtime)
 tests/                          pytest; no network (HTTP mocked at requests.Session)
 docs/                           architecture.md, adr/, LOOM_SCRIPT.md
 postman/                        Postman collection
+Dockerfile, docker-compose.yml  container image and stack (ADR-0015); gunicorn.conf.py
 ```
 
 ## Configuration
 
-All settings are environment variables with development defaults: `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `SQLITE_PATH`, `CORRIDOR_MILES` (10), `STOP_PENALTY_USD` (5), `CACHE_TTL_SECONDS` (86400), `DATASET_VERSION_TTL_SECONDS` (1), `GZIP_RESPONSES` (on; turn it off behind a compressing proxy), `OSRM_URL` (self-host OSRM for production), `NOMINATIM_URL`, `GEOCODER_FALLBACK`.
+All settings are environment variables with development defaults: `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `SQLITE_PATH`, `CORRIDOR_MILES` (10), `STOP_PENALTY_USD` (5), `REDIS_URL` (shared cache; set by docker-compose), `CACHE_TTL_SECONDS` (86400), `DATASET_VERSION_TTL_SECONDS` (1), `GZIP_RESPONSES` (on; turn it off behind a compressing proxy), `OSRM_URL` (self-host OSRM for production), `NOMINATIM_URL`, `GEOCODER_FALLBACK`.
 
 ## Production notes
 
-- **Cache.** Swap LocMemCache for Redis so route and plan caches are shared across workers.
+- **Cache.** Setting `REDIS_URL` switches to Redis, so route and plan caches are shared across workers and replicas. docker-compose already does this.
 - **OSRM.** The public demo server is rate-limited and has no SLA. Self-host OSRM or use a commercial router. Only `OSRM_URL` changes.
 - **Spatial index and prices.** Each worker builds the grid index lazily, in about 50 ms. With PostGIS, the corridor query could become a single `ST_DWithin` against the route line, implemented as another `CorridorFinder` adapter. When the OPIS file is refreshed, rerun `load_fuel_data`. It is idempotent and atomic, and it bumps `FuelDataset.version`, so running workers rebuild their index and stop serving cached plans built from the old prices, with no restart. See [ADR-0011](docs/adr/0011-persistence-and-deployment-topology.md) for the full evolution path.

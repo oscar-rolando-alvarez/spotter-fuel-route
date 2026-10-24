@@ -1,6 +1,6 @@
 # ADR-0011: SQLite and stateless workers for the assessment, with a defined production evolution path
 
-- **Status:** Accepted
+- **Status:** Accepted. The Docker and Redis steps are implemented by [ADR-0015](0015-containerization.md).
 - **Date:** 2026-10-24
 - **Deciders:** Oscar Alvarez
 

@@ -16,6 +16,13 @@ loadtest/run_all.sh                      # ~10 min: all scenarios; reports in lo
 | `locustfile.py` | `WarmUser`, `ComputeUser`, `ConditionalUser` (ETag/304) and `MixedUser`. Every response is validated, not just its status |
 | `run_all.sh` | Starts fake OSRM and gunicorn (8 workers × 4 threads, `DEBUG=0`), then runs every scenario |
 
+Inside Docker (fake OSRM and Locust as compose services; see ADR-0015):
+
+```bash
+OSRM_URL=http://fake-osrm:5001 WEB_CONCURRENCY=8 docker compose --profile loadtest up --build   # UI: http://localhost:8089
+docker compose run --rm --no-deps locust locust -f loadtest/locustfile.py --host http://api:8000 --headless -u 300 -r 100 -t 60s WarmUser
+```
+
 Ad-hoc run against a stack you started yourself:
 
 ```bash

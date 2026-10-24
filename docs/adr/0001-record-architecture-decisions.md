@@ -54,3 +54,4 @@ This service makes several decisions that are not obvious from the code, and tha
 | [0012](0012-performance-under-load.md) | Performance under load: precomputed display geometry, single-flight, edge load shedding | Accepted |
 | [0013](0013-corridor-memo-and-http-caching.md) | Corridor memoization, HTTP conditional GET (ETag/304), configurable gzip | Accepted |
 | [0014](0014-us-boundary-polygon.md) | "Inside the USA" via the Census boundary polygon | Accepted |
+| [0015](0015-containerization.md) | Containerization: immutable multi-stage image, baked data, Redis-backed compose | Accepted |

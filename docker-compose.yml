@@ -1,0 +1,76 @@
+# Spotter Fuel Route: API + Redis (shared cache).
+#
+#   docker compose up --build                 # API on http://localhost:8000
+#
+# Load-test profile: fake OSRM (recorded real routes, no public-server traffic) + Locust UI.
+#   uv run python loadtest/record_osrm.py     # once, on the host: records the routes
+#   OSRM_URL=http://fake-osrm:5001 docker compose --profile loadtest up --build
+#   open http://localhost:8089                # Locust web UI (host is preset to the API)
+
+name: spotter-fuel-route
+
+x-app-image: &app-image
+  build:
+    context: .
+    target: runtime
+  image: spotter-fuel-route:latest
+
+services:
+  api:
+    <<: *app-image
+    ports:
+      - "${API_PORT:-8000}:8000"
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-change-me-in-production}
+      DJANGO_ALLOWED_HOSTS: localhost,127.0.0.1,api
+      REDIS_URL: redis://redis:6379/0
+      OSRM_URL: ${OSRM_URL:-https://router.project-osrm.org}
+      GEOCODER_FALLBACK: ${GEOCODER_FALLBACK:-1}
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-4}
+      GUNICORN_THREADS: ${GUNICORN_THREADS:-4}
+      GZIP_RESPONSES: ${GZIP_RESPONSES:-1}
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    read_only: true            # image is immutable; only /tmp and /dev/shm are writable
+    tmpfs:
+      - /tmp
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          # ~95 MB per worker (8 workers measured at 757 MB); size it with WEB_CONCURRENCY.
+          memory: ${API_MEMORY_LIMIT:-1536m}
+
+  redis:
+    image: redis:7.4-alpine
+    # Pure cache: no persistence; LRU eviction when full (plans are cheap to recompute).
+    command: ["redis-server", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+  fake-osrm:
+    profiles: ["loadtest"]
+    build:
+      context: .
+      target: loadtest
+    image: spotter-fuel-route:loadtest
+    command: ["python", "loadtest/fake_osrm.py", "--host", "0.0.0.0", "--port", "5001", "--latency-ms", "${OSRM_LATENCY_MS:-250}"]
+    volumes:
+      - ./loadtest/fixtures:/app/loadtest/fixtures:ro
+
+  locust:
+    profiles: ["loadtest"]
+    image: spotter-fuel-route:loadtest
+    depends_on:
+      - api
+      - fake-osrm
+    command: ["locust", "-f", "loadtest/locustfile.py", "--host", "http://api:8000", "--processes", "4"]
+    ports:
+      - "8089:8089"

@@ -40,8 +40,8 @@ flowchart TB
     subgraph runtime["Spotter Fuel Route (deployable)"]
         api["Django + DRF web app<br/>(stateless workers)"]
         loader["load_fuel_data<br/>management command (batch)"]
-        db[("SQLite → Postgres/PostGIS<br/>Place · FuelStation · FuelDataset")]
-        cache[("Cache<br/>LocMem → Redis")]
+        db[("SQLite (baked into the image) → Postgres/PostGIS<br/>Place · FuelStation · FuelDataset")]
+        cache[("Redis (docker-compose)<br/>LocMem without REDIS_URL")]
     end
     osrm["OSRM"]
     client --> api
