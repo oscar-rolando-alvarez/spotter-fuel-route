@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fuel route plan</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <style>
+    html, body { margin: 0; height: 100%; font: 14px/1.4 system-ui, sans-serif; }
+    #map { position: absolute; inset: 0 360px 0 0; }
+    aside { position: absolute; top: 0; right: 0; bottom: 0; width: 360px; overflow-y: auto;
+            box-sizing: border-box; padding: 16px; background: #fafafa; border-left: 1px solid #ddd; }
+    h1 { font-size: 18px; margin: 0 0 8px; }
+    .total { font-size: 28px; font-weight: 700; margin: 8px 0; }
+    .muted { color: #666; }
+    ol { padding-left: 20px; }
+    li { margin-bottom: 10px; }
+    .error { color: #b00020; }
+    @media (max-width: 700px) { #map { inset: 0 0 45% 0; } aside { top: 55%; width: 100%; } }
+  </style>
+</head>
+<body>
+<div id="map"></div>
+<aside>
+  {% if ok %}
+    <h1>{{ plan.start.label }} → {{ plan.finish.label }}</h1>
+    <div class="muted">{{ plan.summary.distance_miles }} mi · {{ plan.summary.duration_hours }} h driving</div>
+    <div class="total">${{ plan.summary.total_fuel_cost }}</div>
+    <div class="muted">{{ plan.summary.gallons_purchased }} gal bought at {{ plan.summary.fuel_stops }} stop(s);
+      {{ plan.summary.stations_in_corridor }} stations considered</div>
+    <ol>
+      {% for s in plan.fuel_stops %}
+        <li><strong>{{ s.station.name }}</strong><br>
+          {{ s.station.city }}, {{ s.station.state }} · mile {{ s.route_mile }}<br>
+          {{ s.gallons }} gal × ${{ s.price_per_gallon }} = <strong>${{ s.cost }}</strong></li>
+      {% empty %}
+        <li>No stop needed: the starting tank covers the trip.</li>
+      {% endfor %}
+    </ol>
+  {% else %}
+    <h1 class="error">Could not plan this trip</h1>
+    <pre>{{ plan|pprint }}</pre>
+  {% endif %}
+</aside>
+{{ plan|json_script:"plan" }}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script>
+  const plan = JSON.parse(document.getElementById("plan").textContent);
+  const map = L.map("map").setView([39.5, -98.35], 4);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18, attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+  if (plan.route) {
+    const line = L.geoJSON(plan.route, { style: { color: "#2563eb", weight: 5 } }).addTo(map);
+    map.fitBounds(line.getBounds(), { padding: [24, 24] });
+    L.marker([plan.start.lat, plan.start.lng]).addTo(map).bindPopup("Start: " + plan.start.label);
+    L.marker([plan.finish.lat, plan.finish.lng]).addTo(map).bindPopup("Finish: " + plan.finish.label);
+    for (const s of plan.fuel_stops) {
+      L.circleMarker([s.station.lat, s.station.lng], { radius: 9, color: "#16a34a", fillOpacity: 0.9 })
+        .addTo(map)
+        .bindTooltip(String(s.sequence), { permanent: true, direction: "center", className: "" })
+        .bindPopup(`<b>${s.station.name}</b><br>${s.station.city}, ${s.station.state}<br>` +
+                   `${s.gallons} gal @ $${s.price_per_gallon} = $${s.cost}`);
+    }
+  }
+</script>
+</body>
+</html>
