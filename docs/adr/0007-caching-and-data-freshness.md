@@ -1,6 +1,6 @@
 # ADR-0007: Caching as Decorators over ports, invalidated by a dataset version
 
-- **Status:** Accepted. Amended by [ADR-0012](0012-performance-under-load.md), which adds single-flight to the decorators.
+- **Status:** Accepted. Amended by [ADR-0012](0012-performance-under-load.md), which adds single-flight to the decorators, and by [ADR-0013](0013-corridor-memo-and-http-caching.md), which adds HTTP conditional GET and a 1 s per-process cache of the dataset version.
 - **Date:** 2026-10-24
 - **Deciders:** Oscar Alvarez
 

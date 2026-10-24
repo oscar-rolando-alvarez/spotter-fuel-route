@@ -21,6 +21,7 @@ trap stop_stack EXIT
 start_stack ""
 $LOCUST -u 300 -r 100 -t 60s --processes 4 --csv loadtest/results/1_warm --html loadtest/results/1_warm.html WarmUser
 $LOCUST -u 100 -r 50 -t 60s --processes 4 --csv loadtest/results/2_compute --html loadtest/results/2_compute.html ComputeUser
+$LOCUST -u 300 -r 100 -t 60s --processes 4 --csv loadtest/results/2b_conditional --html loadtest/results/2b_conditional.html ConditionalUser
 $LOCUST -u 500 -r 100 -t 90s --processes 4 --csv loadtest/results/3_mixed --html loadtest/results/3_mixed.html MixedUser
 for u in 25 50 100 200; do
   $LOCUST -u $u -r $u -t 30s --processes 4 --csv loadtest/results/4_step_$u MixedUser

@@ -7,7 +7,7 @@ route point instead of scanning every station for every point.
 
 import math
 import threading
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from collections.abc import Sequence
 
 from fuel_route.domain.geo import haversine_miles, resample
@@ -66,13 +66,19 @@ class LazyStationIndex:
     It also rebuilds when the dataset version in the database changes, so prices
     reloaded by the management command (another process) reach every web worker
     without a restart. The version check is one indexed single-row query.
+
+    Corridor results are memoized per (route, corridor width) in a bounded LRU that is
+    dropped with the grid on a version change: the stations near a route depend only on
+    the route and the loaded data, not on fuel level or stop penalty (ADR-0013).
     """
 
-    def __init__(self, repository: StationRepository):
+    def __init__(self, repository: StationRepository, memo_size: int = 256):
         self._repository = repository
         self._index: GridStationIndex | None = None
         self._version: str | None = None
         self._lock = threading.Lock()
+        self._memo: OrderedDict[tuple, list[CorridorHit]] = OrderedDict()
+        self._memo_size = memo_size
 
     def _get(self) -> GridStationIndex:
         version = self._repository.dataset_version()
@@ -82,6 +88,7 @@ class LazyStationIndex:
                     # A version/points race only causes one extra rebuild, never stale data.
                     self._index = GridStationIndex(self._repository.all_points())
                     self._version = version
+                    self._memo.clear()
         return self._index
 
     @property
@@ -89,4 +96,17 @@ class LazyStationIndex:
         return self._get().size
 
     def along_route(self, route: Sequence[LatLng], corridor_miles: float) -> list[CorridorHit]:
-        return self._get().along_route(route, corridor_miles)
+        index = self._get()
+        # Cheap fingerprint of the polyline (endpoints, midpoint, vertex count) + width.
+        key = (route[0], route[len(route) // 2], route[-1], len(route), corridor_miles) if route else ()
+        with self._lock:
+            if (hit := self._memo.get(key)) is not None:
+                self._memo.move_to_end(key)
+                return list(hit)
+        hits = index.along_route(route, corridor_miles)
+        with self._lock:
+            if index is self._index:  # don't memoize results computed from a superseded grid
+                self._memo[key] = hits
+                if len(self._memo) > self._memo_size:
+                    self._memo.popitem(last=False)
+        return list(hits)

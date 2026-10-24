@@ -9,9 +9,8 @@ import re
 from collections.abc import Sequence
 
 from fuel_route.domain.errors import LocationNotFoundError
-from fuel_route.domain.geo import in_usa
 from fuel_route.domain.model import Location
-from fuel_route.domain.ports import Geocoder
+from fuel_route.domain.ports import Boundary, Geocoder
 from fuel_route.models import Place
 
 from .http import JsonHttpClient
@@ -24,11 +23,14 @@ _COUNTRY = {"usa", "us", "united states"}
 class CoordinateGeocoder:
     name = "coordinates"
 
+    def __init__(self, boundary: Boundary):
+        self._boundary = boundary
+
     def geocode(self, query: str) -> Location | None:
         if not (m := _COORDS.match(query)):
             return None
         lat, lng = float(m[1]), float(m[2])
-        if not in_usa((lat, lng)):
+        if not self._boundary.contains((lat, lng)):
             # Definitive answer: it *is* coordinates, just not in scope. Stop the chain.
             raise LocationNotFoundError(f"{query!r} is not inside the USA (expected 'lat,lng').")
         return Location(query, f"{lat:.5f}, {lng:.5f}", lat, lng, self.name)
@@ -56,9 +58,10 @@ class NominatimGeocoder:
 
     name = "nominatim"
 
-    def __init__(self, base_url: str, http: JsonHttpClient):
+    def __init__(self, base_url: str, http: JsonHttpClient, boundary: Boundary):
         self._base_url = base_url.rstrip("/")
         self._http = http
+        self._boundary = boundary
 
     def geocode(self, query: str) -> Location | None:
         hits = self._http.get_json(
@@ -68,7 +71,7 @@ class NominatimGeocoder:
         if not hits:
             return None
         lat, lng = float(hits[0]["lat"]), float(hits[0]["lon"])
-        if not in_usa((lat, lng)):
+        if not self._boundary.contains((lat, lng)):
             return None
         return Location(query, hits[0].get("display_name", query), lat, lng, self.name)
 

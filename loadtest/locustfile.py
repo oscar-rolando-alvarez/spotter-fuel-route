@@ -4,6 +4,7 @@ Pick a scenario by user class:
     WarmUser     identical trips   -> plan-cache hits (the common production path)
     ComputeUser  unique commands   -> full pipeline minus routing (corridor + DP every time)
     MixedUser    realistic blend   -> hits, misses, errors (400/422), map HTML, health
+    ConditionalUser  revalidation  -> If-None-Match / 304 (what browsers and CDNs do)
 
 Example:
     uv run --group load locust -f loadtest/locustfile.py --headless -u 200 -r 50 -t 60s \\
@@ -72,6 +73,33 @@ class ComputeUser(HttpUser):
         params = {"start": start, "finish": finish, "stop_penalty": f"{random.uniform(0, 20):.6f}"}
         with self.client.get(URL, params=params, name="route-plan [compute]", catch_response=True) as r:
             check_plan(r)
+
+
+class ConditionalUser(HttpUser):
+    """Clients/CDNs that revalidate: after the first 200, send If-None-Match and expect 304."""
+
+    wait_time = constant(0)
+
+    def on_start(self):
+        self.etags: dict[tuple[str, str], str] = {}
+
+    @task
+    def revalidate(self):
+        start, finish, _, cost = random.choice(OK_TRIPS)
+        etag = self.etags.get((start, finish))
+        headers = {"If-None-Match": etag} if etag else {}
+        name = "route-plan [304]" if etag else "route-plan [warm]"
+        with self.client.get(
+            URL, params={"start": start, "finish": finish}, headers=headers, name=name, catch_response=True
+        ) as r:
+            if etag:
+                if r.status_code == 304 and r.headers.get("ETag") == etag:
+                    r.success()
+                else:
+                    r.failure(f"expected 304, got {r.status_code}")
+            else:
+                self.etags[(start, finish)] = r.headers.get("ETag", "")
+                check_plan(r, cost)
 
 
 class MixedUser(HttpUser):

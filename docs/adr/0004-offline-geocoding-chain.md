@@ -1,6 +1,6 @@
 # ADR-0004: Offline geocoding with a US Census gazetteer and a Chain-of-Responsibility resolver
 
-- **Status:** Accepted
+- **Status:** Accepted. Its known gap (the bounding-box USA check) is resolved by [ADR-0014](0014-us-boundary-polygon.md).
 - **Date:** 2026-10-24
 - **Deciders:** Oscar Alvarez
 

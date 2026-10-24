@@ -113,3 +113,37 @@ def test_reloading_prices_invalidates_cached_plans(client, corridor_data, fake_o
     again = client.get(URL, params).json()
     assert again["meta"]["cache_hit"] is False
     assert again["fuel_stops"][0]["price_per_gallon"] == 2.5
+
+
+def test_conditional_get_returns_304_without_planning(client, corridor_data, fake_osrm):
+    params = {"start": "Westtown, NE", "finish": "Easttown, IL"}
+    first = client.get(URL, params)
+    etag = first.headers["ETag"]
+    assert etag.startswith('W/"') and "max-age=300" in first.headers["Cache-Control"]
+
+    with mock.patch("fuel_route.api.views.present_trip") as present:
+        again = client.get(URL, params, HTTP_IF_NONE_MATCH=etag)
+    assert again.status_code == 304 and again.content == b""
+    assert again.headers["ETag"] == etag
+    present.assert_not_called()  # no planning, no presenting
+
+    other = client.get(URL, {**params, "stop_penalty": 0}, HTTP_IF_NONE_MATCH=etag)
+    assert other.status_code == 200 and other.headers["ETag"] != etag
+
+
+def test_etag_changes_when_prices_are_reloaded(client, corridor_data, fake_osrm):
+    from fuel_route.models import FuelDataset
+
+    params = {"start": "Westtown, NE", "finish": "Easttown, IL"}
+    etag = client.get(URL, params).headers["ETag"]
+    FuelDataset.objects.create(pk=1, version="new-file", stations=5)
+    r = client.get(URL, params, HTTP_IF_NONE_MATCH=etag)
+    assert r.status_code == 200 and r.headers["ETag"] != etag
+
+
+def test_gzip_and_post_is_not_cacheable(client, corridor_data, fake_osrm):
+    params = {"start": "Westtown, NE", "finish": "Easttown, IL"}
+    r = client.get(URL, params, HTTP_ACCEPT_ENCODING="gzip")
+    assert r.headers["Content-Encoding"] == "gzip" and "Accept-Encoding" in r.headers["Vary"]
+    post = client.post(URL, params, content_type="application/json")
+    assert "ETag" not in post.headers and "Cache-Control" not in post.headers

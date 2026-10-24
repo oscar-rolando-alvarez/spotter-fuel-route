@@ -51,7 +51,7 @@ open "http://localhost:8000/api/v1/route-plan/map/?start=Chicago,%20IL&finish=De
 Run the tests and linter:
 
 ```bash
-uv run pytest            # 93 tests, < 1 s, no network
+uv run pytest            # 113 tests, < 1 s, no network
 uv run ruff check .
 ```
 
@@ -73,6 +73,8 @@ Parameters:
 | `start_fuel_gallons` | no | Fuel in the tank at departure, 0–50. Default: full (50 gal = 500 mi) |
 | `stop_penalty` | no | USD "cost" of making a stop (default `5`). `0` means cheapest fuel regardless of the number of stops |
 | `strategy` | no | `dp` (default: cost plus stop penalty, exact) or `greedy` (pure cheapest fuel, the textbook algorithm) |
+
+`GET` responses carry a weak `ETag` and `Cache-Control: public, max-age=300`. Sending `If-None-Match` returns `304 Not Modified` without recomputing anything. The ETag changes when prices are reloaded. Coordinates are checked against the real US border polygon (Census, 1:5M), so Montreal or Tijuana coordinates are rejected.
 
 Errors use one shape, `{"error": "<code>", "detail": "..."}`:
 - `400 invalid_request` (with field details) or `location_not_found` (including locations outside the USA)
@@ -131,21 +133,29 @@ With the default `$5` penalty, NYC→LA drops from **17 stops to 6** and costs *
 
 The service was tested with gunicorn (8 workers × 4 threads) against a local fake OSRM that serves real recorded routes with 250 ms of latency. Every response was validated for correctness. Full report: [`docs/load-test-report.md`](docs/load-test-report.md).
 
-| Scenario | RPS | p95 | Errors |
+| Scenario (one 8-worker node) | RPS | p95 | Errors |
 |---|---|---|---|
-| Warm (plan cache), 300 users | 2,277 | 270 ms | 0 / 136,791 |
-| Compute (corridor + DP every request), 100 users | 140 | 1.7 s | 0 / 8,414 |
-| Mixed realistic, at the capacity knee (50 users) | 489 | 160 ms | 0 / 14,687 |
-| Spike: 2,000 users ramped at 200/s | 553 | 5.0 s | 0.04% (TCP resets from the OS backlog) |
-| Cold: no cache, 250 ms upstream on every request | 95 | 2.7 s | 0 / 5,701 |
+| Mixed realistic at the capacity knee (100 users) | **907** | **160 ms** | 0 / 27,245 |
+| Warm (plan cache), 300 users | 2,087 (2,710 without in-app gzip) | 230 ms | 0 / 125,533 |
+| Revalidation (`If-None-Match` → 304), 300 users | 6,289 | 55 ms | 0 / 377,982 |
+| Compute (corridor + DP every request), 100 users | 290 | 890 ms | 0 / 17,415 |
+| Spike: 2,000 users ramped at 200/s | 953 | 2.7 s | **0** / 71,567 |
+| Cold: no cache, 250 ms upstream on every request | 134 | 2.6 s | 0 / 8,054 |
 
-The test found two bottlenecks, both fixed (ADR-0012). Geometry simplification ran on every response, which made cache hits 130× slower. Concurrent cache misses each called OSRM. The fixes raised warm throughput 11.5× and compute throughput 55%. Reproduce with `loadtest/run_all.sh` (see [`loadtest/README.md`](loadtest/README.md)).
+Two rounds of profiling-driven fixes ([ADR-0012](docs/adr/0012-performance-under-load.md), [ADR-0013](docs/adr/0013-corridor-memo-and-http-caching.md)) raised capacity at p95 160 ms from about 490 to about 900 RPS per node:
+- geometry simplified once per route, not on every response;
+- single-flight caches, so there is no OSRM stampede;
+- corridor search memoized per route;
+- ETag/304 conditional GET;
+- dataset-version reads cached for 1 s.
+
+Across about 1.7M validated requests there were 0 incorrect responses. Reproduce with `loadtest/run_all.sh` (see [`loadtest/README.md`](loadtest/README.md)).
 
 ## Architecture and decisions
 
 - [`docs/architecture.md`](docs/architecture.md): quality goals, C4 context, container and component views, a sequence diagram, the design-pattern catalogue, the data model and the risk register.
 - [`docs/load-test-report.md`](docs/load-test-report.md): load and stress test results, the bottlenecks found and fixed, and capacity planning.
-- [`docs/adr/`](docs/adr/0001-record-architecture-decisions.md): 12 Architecture Decision Records in MADR format. Each lists the options considered, the consequences, how the decision is confirmed in tests, and when to revisit it.
+- [`docs/adr/`](docs/adr/0001-record-architecture-decisions.md): 14 Architecture Decision Records in MADR format. Each lists the options considered, the consequences, how the decision is confirmed in tests, and when to revisit it.
 
 | ADR | Decision |
 |---|---|
@@ -160,6 +170,8 @@ The test found two bottlenecks, both fixed (ADR-0012). Geometry simplification r
 | [0010](docs/adr/0010-testing-strategy.md) | Fakes at the ports, oracle and property tests, architecture fitness functions |
 | [0011](docs/adr/0011-persistence-and-deployment-topology.md) | SQLite and stateless workers now, and the production evolution path |
 | [0012](docs/adr/0012-performance-under-load.md) | Performance under load: precomputed geometry, single-flight caches, edge load shedding |
+| [0013](docs/adr/0013-corridor-memo-and-http-caching.md) | Corridor memoization, ETag/304 conditional GET, configurable gzip |
+| [0014](docs/adr/0014-us-boundary-polygon.md) | "Inside the USA" checked against the Census boundary polygon |
 
 Design patterns used, each only where it earns its place:
 
@@ -198,7 +210,7 @@ fuel_route/
   models.py                     ORM: Place, FuelStation, FuelDataset (version)
   management/commands/load_fuel_data.py
   templates/fuel_route/map.html Leaflet map
-data/                           price CSV, gazetteer, overrides (all committed)
+data/                           price CSV, gazetteer, overrides, US border polygon (all committed)
 scripts/                        reproducible data builders (not used at runtime)
 tests/                          pytest; no network (HTTP mocked at requests.Session)
 docs/                           architecture.md, adr/, LOOM_SCRIPT.md
@@ -207,7 +219,7 @@ postman/                        Postman collection
 
 ## Configuration
 
-All settings are environment variables with development defaults: `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `SQLITE_PATH`, `CORRIDOR_MILES` (10), `STOP_PENALTY_USD` (5), `CACHE_TTL_SECONDS` (86400), `OSRM_URL` (self-host OSRM for production), `NOMINATIM_URL`, `GEOCODER_FALLBACK`.
+All settings are environment variables with development defaults: `DJANGO_SECRET_KEY`, `DJANGO_DEBUG`, `DJANGO_ALLOWED_HOSTS`, `SQLITE_PATH`, `CORRIDOR_MILES` (10), `STOP_PENALTY_USD` (5), `CACHE_TTL_SECONDS` (86400), `DATASET_VERSION_TTL_SECONDS` (1), `GZIP_RESPONSES` (on; turn it off behind a compressing proxy), `OSRM_URL` (self-host OSRM for production), `NOMINATIM_URL`, `GEOCODER_FALLBACK`.
 
 ## Production notes
 

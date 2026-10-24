@@ -18,6 +18,12 @@ class Geocoder(Protocol):
     def geocode(self, query: str) -> Location | None: ...
 
 
+class Boundary(Protocol):
+    """Geographic scope of the service (the USA): is this point inside it?"""
+
+    def contains(self, point: LatLng) -> bool: ...
+
+
 class LocationResolver(Protocol):
     """Resolve a query or raise LocationNotFoundError (the chain as a whole)."""
 

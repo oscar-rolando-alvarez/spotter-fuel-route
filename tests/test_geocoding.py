@@ -3,6 +3,7 @@ from unittest import mock
 import pytest
 
 from fuel_route.domain.errors import LocationNotFoundError
+from fuel_route.domain.geo import Region
 from fuel_route.infrastructure.caching import CachedGeocoder
 from fuel_route.infrastructure.geocoding import (
     CoordinateGeocoder,
@@ -11,6 +12,9 @@ from fuel_route.infrastructure.geocoding import (
     NominatimGeocoder,
 )
 from fuel_route.models import Place
+
+# A box around the lower 48 is enough for these unit tests; the real border is tested in test_geo.
+BOX = Region([[[(24.0, -125.0), (24.0, -66.0), (49.5, -66.0), (49.5, -125.0)]]])
 
 
 @pytest.fixture
@@ -27,7 +31,7 @@ def nominatim_http():
 
 
 def chain(*extra):
-    return GeocoderChain([CoordinateGeocoder(), GazetteerGeocoder(), *extra])
+    return GeocoderChain([CoordinateGeocoder(BOX), GazetteerGeocoder(), *extra])
 
 
 def test_coordinates_need_no_lookup(places):
@@ -37,7 +41,7 @@ def test_coordinates_need_no_lookup(places):
 
 def test_coordinates_outside_usa_stop_the_chain(places, nominatim_http):
     with pytest.raises(LocationNotFoundError, match="not inside the USA"):
-        chain(NominatimGeocoder("https://n", nominatim_http)).resolve("48.85,2.35")
+        chain(NominatimGeocoder("https://n", nominatim_http, BOX)).resolve("48.85,2.35")
     nominatim_http.get_json.assert_not_called()
 
 
@@ -52,14 +56,14 @@ def test_abbreviation_variants(places):
 
 
 def test_gazetteer_hit_never_reaches_network(places, nominatim_http):
-    chain(NominatimGeocoder("https://n", nominatim_http)).resolve("Chicago, IL")
+    chain(NominatimGeocoder("https://n", nominatim_http, BOX)).resolve("Chicago, IL")
     nominatim_http.get_json.assert_not_called()
 
 
 def test_falls_back_to_cached_nominatim(places, nominatim_http):
     from django.core.cache import cache
 
-    resolver = chain(CachedGeocoder(NominatimGeocoder("https://n", nominatim_http), cache, 60))
+    resolver = chain(CachedGeocoder(NominatimGeocoder("https://n", nominatim_http, BOX), cache, 60))
     first = resolver.resolve("3570 Las Vegas Blvd S")
     second = resolver.resolve("3570 las vegas blvd s ")
     assert first.source == "nominatim" and (first.lat, first.lng) == (second.lat, second.lng)

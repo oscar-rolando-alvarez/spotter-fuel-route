@@ -2,7 +2,30 @@
 
 - **Date:** 2026-10-24
 - **Scope:** `GET /api/v1/route-plan/` (warm, compute, cold), `/route-plan/map/`, `/health/`, and the 400/422 error paths.
-- **Verdict:** ✅ Every endpoint kept serving correct results under sustained and spike load. Across about **356k requests there were 0 incorrect responses**. The only failures were TCP connection resets on the test host during a 1,000 users/s spike, caused by the OS accept backlog. They are not application errors. Two bottlenecks were found and fixed. Warm-path throughput rose **11.5×** and compute-path throughput **+55%**.
+- **Verdict:** ✅ Every endpoint kept serving correct results under sustained and spike load, across about **1.7M validated requests in two rounds with 0 incorrect responses**. Round 1 (sections 1–5) found and fixed two bottlenecks (ADR-0012). Round 2 (section 0) added corridor memoization, ETag/304 conditional GET and cached dataset-version reads (ADR-0013). Together they **raised per-node capacity at p95 160 ms from about 490 to about 900 RPS**, and the 2,000-user spike now completes with **0 errors**.
+
+## 0. Round 2: current numbers (default configuration, gzip on)
+
+Same harness and host as round 1: gunicorn with 8 workers × 4 threads, fake OSRM at 250 ms, Locust validating every response.
+
+| Scenario | Users (spawn/s) | Requests | Failures | RPS | p50 | p95 | p99 | Round 1 RPS / p95 |
+|---|---|---|---|---|---|---|---|---|
+| Warm (200s from the plan cache) | 300 (100) | 125,533 | 0 | 2,087 | 110 ms | 230 ms | 300 ms | 2,277 / 270 ms |
+| Warm, `GZIP_RESPONSES=0` | 300 (100) | 162,922 | 0 | **2,710** | 110 ms | 170 ms | 210 ms | 2,277 / 270 ms |
+| **Revalidation (304)** | 300 (100) | 377,982 | 0 | **6,289** | 33 ms | 55 ms | 82 ms | n/a |
+| Compute (corridor + DP every request) | 100 (50) | 17,415 | 0 | **290** | 290 ms | 890 ms | 980 ms | 140 / 1,700 ms |
+| Mixed | 25 (25) | 12,129 | 0 | 404 | 4 ms | 36 ms | 55 ms | 328 / 93 ms |
+| Mixed | 50 (50) | 19,911 | 0 | 663 | 15 ms | 78 ms | 120 ms | 489 / 160 ms |
+| **Mixed** | **100 (100)** | 27,245 | 0 | **907** | 44 ms | **160 ms** | 230 ms | 513 / 480 ms |
+| Mixed | 200 (200) | 29,198 | 0 | 972 | 110 ms | 400 ms | 480 ms | 549 / 660 ms |
+| **Spike, ramped** | 2,000 (200) | 71,567 | **0** | **953** | 2,100 ms | 2,700 ms | 2,900 ms | 553 / 5,000 ms, 0.04% resets |
+| Cold, no cache (TTL 0) | 100 (50) | 8,054 | 0 | 134 | 440 ms | 2,600 ms | 2,800 ms | 95 / 2,700 ms |
+
+**Gzip trade-off.** Compression shrinks NYC→LA from 43.6 KB to 16.5 KB (2.6×) but costs about 23% of warm-path throughput (2,710 → 2,087 RPS) on localhost, where bandwidth is free. Over real networks the smaller payload usually wins. Behind a compressing proxy, set `GZIP_RESPONSES=0`.
+
+**Updated capacity planning.** One 8-worker node sustains about **850 RPS at p95 ≤ 160 ms** with a 20% compute mix (headroom below the ~900 RPS knee), so `nodes = ceil(target_rps / 850)`, plus one for N+1. Repeat traffic that revalidates with ETags is served at about 3× the rate of full 200 responses, with no body.
+
+# Round 1 (baseline and first fixes)
 
 ## 1. Method
 

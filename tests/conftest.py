@@ -6,7 +6,9 @@ from fuel_route.models import FuelStation, Place
 
 
 @pytest.fixture(autouse=True)
-def _isolate_caches():
+def _isolate_caches(settings):
+    # Tests reload prices and expect the very next request to see them.
+    settings.FUEL_ROUTE = {**settings.FUEL_ROUTE, "DATASET_VERSION_TTL_SECONDS": 0}
     cache.clear()
     container.reset()
     yield

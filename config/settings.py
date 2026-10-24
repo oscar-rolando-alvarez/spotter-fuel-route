@@ -26,6 +26,10 @@ MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
     "django.middleware.common.CommonMiddleware",
 ]
+# Compresses the JSON (NYC→LA: 43.6 KB → 16.5 KB, 2.6x). Costs ~25% warm-path throughput in Python,
+# so behind a proxy that compresses (nginx, CloudFront, ALB) set GZIP_RESPONSES=0 (ADR-0013).
+if env_bool("GZIP_RESPONSES", True):
+    MIDDLEWARE.insert(0, "django.middleware.gzip.GZipMiddleware")
 
 ROOT_URLCONF = "config.urls"
 WSGI_APPLICATION = "config.wsgi.application"
@@ -84,6 +88,8 @@ FUEL_ROUTE = {
     "HTTP_TIMEOUT_SECONDS": 15,
     # Routes, geocodes and plans are deterministic for the same inputs and price file.
     "CACHE_TTL_SECONDS": int(os.environ.get("CACHE_TTL_SECONDS", 60 * 60 * 24)),
+    # How long a worker trusts its last read of the dataset version (max staleness after a reload).
+    "DATASET_VERSION_TTL_SECONDS": float(os.environ.get("DATASET_VERSION_TTL_SECONDS", 1.0)),
     "USER_AGENT": "spotter-fuel-route/0.1",
 }
 

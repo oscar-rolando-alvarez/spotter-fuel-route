@@ -13,7 +13,7 @@ loadtest/run_all.sh                      # ~10 min: all scenarios; reports in lo
 | `trips.py` | Trips under test, with expected status and baseline cost (used for correctness checks) |
 | `record_osrm.py` | Records real OSRM responses keyed exactly as the app requests them |
 | `fake_osrm.py` | Local OSRM stand-in with configurable latency, so we never stress the public server |
-| `locustfile.py` | `WarmUser`, `ComputeUser` and `MixedUser`. Every response is validated, not just its status |
+| `locustfile.py` | `WarmUser`, `ComputeUser`, `ConditionalUser` (ETag/304) and `MixedUser`. Every response is validated, not just its status |
 | `run_all.sh` | Starts fake OSRM and gunicorn (8 workers × 4 threads, `DEBUG=0`), then runs every scenario |
 
 Ad-hoc run against a stack you started yourself:

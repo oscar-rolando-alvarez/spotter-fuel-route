@@ -14,6 +14,7 @@ from django.core.cache import cache
 from fuel_route.application.plan_trip import CachedPlanTripService, PlanTripService
 from fuel_route.domain.model import Vehicle
 from fuel_route.domain.optimizer import make_strategy
+from fuel_route.infrastructure.boundary import load_region
 from fuel_route.infrastructure.caching import CachedGeocoder, CachedRoutingProvider
 from fuel_route.infrastructure.geocoding import CoordinateGeocoder, GazetteerGeocoder, GeocoderChain, NominatimGeocoder
 from fuel_route.infrastructure.http import JsonHttpClient
@@ -38,11 +39,12 @@ def _build() -> Container:
     ttl = cfg["CACHE_TTL_SECONDS"]
     http = JsonHttpClient(cfg["USER_AGENT"], cfg["HTTP_TIMEOUT_SECONDS"])
 
-    geocoders = [CoordinateGeocoder(), GazetteerGeocoder()]
+    usa = load_region(settings.DATA_DIR / "us_border.json.gz")
+    geocoders = [CoordinateGeocoder(usa), GazetteerGeocoder()]
     if cfg["GEOCODER_FALLBACK"]:
-        geocoders.append(CachedGeocoder(NominatimGeocoder(cfg["NOMINATIM_URL"], http), cache, ttl))
+        geocoders.append(CachedGeocoder(NominatimGeocoder(cfg["NOMINATIM_URL"], http, usa), cache, ttl))
 
-    stations = DjangoStationRepository()
+    stations = DjangoStationRepository(version_ttl_seconds=cfg["DATASET_VERSION_TTL_SECONDS"])
     index = LazyStationIndex(stations)
     service = PlanTripService(
         locations=GeocoderChain(geocoders),

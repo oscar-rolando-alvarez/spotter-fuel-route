@@ -52,3 +52,32 @@ def test_lazy_proxy_builds_once_and_rebuilds_on_new_dataset_version():
     repo.version = "v2"  # prices reloaded by another process
     assert len(proxy.along_route(LINE, 10)) == 2
     assert repo.loads == 2
+
+
+def test_corridor_is_memoized_per_route_and_dropped_on_new_version(monkeypatch):
+    repo = FakeRepository()
+    proxy = LazyStationIndex(repo)
+    calls = []
+    original = GridStationIndex.along_route
+
+    def counting(self, route, corridor_miles):
+        calls.append(corridor_miles)
+        return original(self, route, corridor_miles)
+
+    monkeypatch.setattr(GridStationIndex, "along_route", counting)
+    first = proxy.along_route(LINE, 10)
+    assert proxy.along_route(LINE, 10) == first and len(calls) == 1  # memo hit
+    proxy.along_route(LINE, 30)
+    assert len(calls) == 2  # different width -> different key
+
+    repo.points.append(StationPoint(2, 40.0, -94.0, 2.9))
+    repo.version = "v2"
+    assert len(proxy.along_route(LINE, 10)) == 2 and len(calls) == 3  # memo dropped with the old grid
+
+
+def test_dataset_version_read_is_cached_for_its_ttl(db, django_assert_num_queries):
+    from fuel_route.infrastructure.repositories import DjangoStationRepository
+
+    repo = DjangoStationRepository(version_ttl_seconds=60)
+    with django_assert_num_queries(1):
+        assert repo.dataset_version() == repo.dataset_version() == "empty"

@@ -4,7 +4,7 @@
 - **Date:** 2026-10-24
 - **Deciders:** Oscar Alvarez
 - **Amends:** ADR-0007 (caching) and ADR-0009 (the presenter no longer simplifies geometry)
-- **Evidence:** [`docs/load-test-report.md`](../load-test-report.md)
+- **Evidence:** [`docs/load-test-report.md`](../load-test-report.md). Capacity was raised again by [ADR-0013](0013-corridor-memo-and-http-caching.md).
 
 ## Context and problem statement
 

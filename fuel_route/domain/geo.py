@@ -7,13 +7,6 @@ from .model import LatLng
 
 EARTH_RADIUS_MILES = 3958.8
 
-# Rough boxes for CONUS, Alaska and Hawaii; good enough to reject "Paris, France".
-_US_BOXES = (
-    (24.3, 49.5, -125.0, -66.8),
-    (51.2, 71.5, -179.2, -129.9),
-    (18.8, 22.4, -160.5, -154.6),
-)
-
 
 def haversine_miles(a: LatLng, b: LatLng) -> float:
     lat1, lng1, lat2, lng2 = map(math.radians, (*a, *b))
@@ -21,9 +14,43 @@ def haversine_miles(a: LatLng, b: LatLng) -> float:
     return 2 * EARTH_RADIUS_MILES * math.asin(math.sqrt(h))
 
 
-def in_usa(point: LatLng) -> bool:
-    lat, lng = point
-    return any(s <= lat <= n and w <= lng <= e for s, n, w, e in _US_BOXES)
+class Region:
+    """A multipolygon (with holes) and an even-odd point-in-polygon test (ADR-0014).
+
+    Pure data + math: the caller supplies the rings (the infrastructure layer loads the
+    Census boundary). Each polygon keeps its bounding box, so a query only ray-casts the
+    one or two polygons whose box contains the point.
+    """
+
+    def __init__(self, polygons: Sequence[Sequence[Sequence[LatLng]]]):
+        self._polygons = []
+        for rings in polygons:
+            outer = rings[0]
+            lats, lngs = [p[0] for p in outer], [p[1] for p in outer]
+            bbox = (min(lats), max(lats), min(lngs), max(lngs))
+            self._polygons.append((bbox, [tuple(map(tuple, r)) for r in rings]))
+
+    def contains(self, point: LatLng) -> bool:
+        lat, lng = point
+        for (s, n, w, e), rings in self._polygons:
+            # Cheap box test first; then inside the outer ring and in no hole (lakes, enclaves).
+            in_box = s <= lat <= n and w <= lng <= e
+            if in_box and _in_ring(lat, lng, rings[0]) and not any(_in_ring(lat, lng, h) for h in rings[1:]):
+                return True
+        return False
+
+
+def _in_ring(lat: float, lng: float, ring: Sequence[LatLng]) -> bool:
+    """Even-odd ray casting along +lng. Planar is fine at boundary-file resolution."""
+    inside = False
+    j = len(ring) - 1
+    for i in range(len(ring)):
+        yi, xi = ring[i]
+        yj, xj = ring[j]
+        if (yi > lat) != (yj > lat) and lng < (xj - xi) * (lat - yi) / (yj - yi) + xi:
+            inside = not inside
+        j = i
+    return inside
 
 
 def cumulative_miles(points: Sequence[LatLng]) -> list[float]:

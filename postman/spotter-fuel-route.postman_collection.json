@@ -8,6 +8,10 @@
     {
       "key": "baseUrl",
       "value": "http://localhost:8000"
+    },
+    {
+      "key": "etag",
+      "value": ""
     }
   ],
   "item": [
@@ -325,6 +329,93 @@
       ]
     },
     {
+      "name": "ETag 1/2: first GET (stores ETag)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 with ETag and Cache-Control', () => { pm.response.to.have.status(200); pm.expect(pm.response.headers.get('ETag')).to.match(/^W\\//); pm.expect(pm.response.headers.get('Cache-Control')).to.include('max-age'); });",
+              "pm.collectionVariables.set('etag', pm.response.headers.get('ETag'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "description": "Plans the trip and returns a weak ETag tied to the command, the loaded price file and settings.",
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/route-plan/?start=Chicago, IL&finish=Denver, CO",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route-plan",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "Chicago, IL"
+            },
+            {
+              "key": "finish",
+              "value": "Denver, CO"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "ETag 2/2: revalidate → 304",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('304 Not Modified, empty body', () => { pm.response.to.have.status(304); pm.expect(pm.response.text()).to.eql(''); });"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "description": "Same request with If-None-Match: answered before any planning work (ADR-0013).",
+        "header": [
+          {
+            "key": "If-None-Match",
+            "value": "{{etag}}"
+          }
+        ],
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/route-plan/?start=Chicago, IL&finish=Denver, CO",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route-plan",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "Chicago, IL"
+            },
+            {
+              "key": "finish",
+              "value": "Denver, CO"
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "Map view (open in browser)",
       "request": {
         "method": "GET",
@@ -405,6 +496,47 @@
           }
         }
       ]
+    },
+    {
+      "name": "Error: Montreal coordinates (border polygon)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('400', () => pm.response.to.have.status(400));",
+              "pm.test('error code', () => pm.expect(pm.response.json().error).to.eql('location_not_found'));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "description": "Southern Canada used to pass a bounding-box check; the Census border polygon rejects it (ADR-0014).",
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/route-plan/?start=45.5019,-73.5674&finish=Denver, CO",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route-plan",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "45.5019,-73.5674"
+            },
+            {
+              "key": "finish",
+              "value": "Denver, CO"
+            }
+          ]
+        }
+      }
     },
     {
       "name": "Error: no station coverage (LA → Seattle)",
