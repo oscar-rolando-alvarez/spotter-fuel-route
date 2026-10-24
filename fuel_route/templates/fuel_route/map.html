@@ -47,8 +47,9 @@
 <script>
   const plan = JSON.parse(document.getElementById("plan").textContent);
   const map = L.map("map").setView([39.5, -98.35], 4);
-  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
-    maxZoom: 18, attribution: "&copy; OpenStreetMap contributors"
+  // Esri basemap: keyless, and (unlike tile.openstreetmap.org) doesn't block localhost/no-Referer clients.
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 19, attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, USGS, NGA, EPA, USDA, NPS"
   }).addTo(map);
   if (plan.route) {
     const line = L.geoJSON(plan.route, { style: { color: "#2563eb", weight: 5 } }).addTo(map);
