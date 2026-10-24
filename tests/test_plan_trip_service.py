@@ -75,7 +75,8 @@ def test_orchestrates_ports_into_a_trip_plan(parts):
     assert [s.station.opis_id for s in plan.stops] == [1002]  # the $2.90 station
     assert plan.strategy == "dp" and plan.stop_penalty == 5
     assert plan.start_fuel_gallons == 50
-    assert set(plan.timings_ms) == {"geocode", "routing", "corridor", "optimize"}
+    assert set(plan.timings_ms) == {"geocode", "routing", "corridor", "optimize", "simplify"}
+    assert len(plan.route.coordinates) == 2  # straight line: simplified to its endpoints
 
 
 def test_unknown_strategy_fails_before_any_io(parts):

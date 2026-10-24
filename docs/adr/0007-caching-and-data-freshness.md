@@ -1,6 +1,6 @@
 # ADR-0007: Caching as Decorators over ports, invalidated by a dataset version
 
-- **Status:** Accepted
+- **Status:** Accepted. Amended by [ADR-0012](0012-performance-under-load.md), which adds single-flight to the decorators.
 - **Date:** 2026-10-24
 - **Deciders:** Oscar Alvarez
 

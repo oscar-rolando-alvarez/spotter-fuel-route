@@ -5,3 +5,5 @@ db.sqlite3
 .pytest_cache/
 .ruff_cache/
 .DS_Store
+loadtest/fixtures/
+loadtest/results/

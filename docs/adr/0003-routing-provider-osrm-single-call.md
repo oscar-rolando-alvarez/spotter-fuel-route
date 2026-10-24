@@ -32,7 +32,7 @@ The assignment requires a free map/routing API. It states that one call per requ
 GET /route/v1/driving/{lng,lat};{lng,lat}?overview=full&geometries=geojson&steps=false&alternatives=false
 ```
 
-- `overview=full` returns full-resolution geometry, which keeps corridor matching accurate. The presenter later simplifies it for the response with Douglas–Peucker at 0.001°, about 100 m.
+- `overview=full` returns full-resolution geometry, which keeps corridor matching accurate. The use case then simplifies it once for display, with Douglas–Peucker at 0.001° (about 100 m), memoized per route (ADR-0012).
 - `steps=false` and `alternatives=false` keep the payload minimal. Turn-by-turn directions are not needed.
 - The start and finish are geocoded **offline** (ADR-0004), so `"City, ST"` and `"lat,lng"` inputs make **exactly one** external call. Only a free-form street address adds one Nominatim call, which is cached; the worst case is three calls.
 - `CachedRoutingProvider` (ADR-0007) makes repeated trips cost zero calls.

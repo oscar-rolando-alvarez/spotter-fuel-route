@@ -51,7 +51,7 @@ open "http://localhost:8000/api/v1/route-plan/map/?start=Chicago,%20IL&finish=De
 Run the tests and linter:
 
 ```bash
-uv run pytest            # 92 tests, < 1 s, no network
+uv run pytest            # 93 tests, < 1 s, no network
 uv run ruff check .
 ```
 
@@ -127,10 +127,25 @@ With the default `$5` penalty, NYC→LA drops from **17 stops to 6** and costs *
 - Total cost is the money spent at the pumps on this trip.
 - Detours from the highway to a station are ignored. They are at most a few miles because of the corridor width.
 
+## Load and stress testing
+
+The service was tested with gunicorn (8 workers × 4 threads) against a local fake OSRM that serves real recorded routes with 250 ms of latency. Every response was validated for correctness. Full report: [`docs/load-test-report.md`](docs/load-test-report.md).
+
+| Scenario | RPS | p95 | Errors |
+|---|---|---|---|
+| Warm (plan cache), 300 users | 2,277 | 270 ms | 0 / 136,791 |
+| Compute (corridor + DP every request), 100 users | 140 | 1.7 s | 0 / 8,414 |
+| Mixed realistic, at the capacity knee (50 users) | 489 | 160 ms | 0 / 14,687 |
+| Spike: 2,000 users ramped at 200/s | 553 | 5.0 s | 0.04% (TCP resets from the OS backlog) |
+| Cold: no cache, 250 ms upstream on every request | 95 | 2.7 s | 0 / 5,701 |
+
+The test found two bottlenecks, both fixed (ADR-0012). Geometry simplification ran on every response, which made cache hits 130× slower. Concurrent cache misses each called OSRM. The fixes raised warm throughput 11.5× and compute throughput 55%. Reproduce with `loadtest/run_all.sh` (see [`loadtest/README.md`](loadtest/README.md)).
+
 ## Architecture and decisions
 
 - [`docs/architecture.md`](docs/architecture.md): quality goals, C4 context, container and component views, a sequence diagram, the design-pattern catalogue, the data model and the risk register.
-- [`docs/adr/`](docs/adr/0001-record-architecture-decisions.md): 11 Architecture Decision Records in MADR format. Each lists the options considered, the consequences, how the decision is confirmed in tests, and when to revisit it.
+- [`docs/load-test-report.md`](docs/load-test-report.md): load and stress test results, the bottlenecks found and fixed, and capacity planning.
+- [`docs/adr/`](docs/adr/0001-record-architecture-decisions.md): 12 Architecture Decision Records in MADR format. Each lists the options considered, the consequences, how the decision is confirmed in tests, and when to revisit it.
 
 | ADR | Decision |
 |---|---|
@@ -144,6 +159,7 @@ With the default `$5` penalty, NYC→LA drops from **17 stops to 6** and costs *
 | [0009](docs/adr/0009-api-contract-and-error-model.md) | Versioned REST contract, DTOs and presenter, one error model |
 | [0010](docs/adr/0010-testing-strategy.md) | Fakes at the ports, oracle and property tests, architecture fitness functions |
 | [0011](docs/adr/0011-persistence-and-deployment-topology.md) | SQLite and stateless workers now, and the production evolution path |
+| [0012](docs/adr/0012-performance-under-load.md) | Performance under load: precomputed geometry, single-flight caches, edge load shedding |
 
 Design patterns used, each only where it earns its place:
 
@@ -154,6 +170,7 @@ Design patterns used, each only where it earns its place:
 | Strategy + registry | `domain/optimizer.py` | `?strategy=dp\|greedy`. New objectives need no change to the use case |
 | Chain of Responsibility | `infrastructure/geocoding.py` | Coordinates → gazetteer → Nominatim, cheapest first |
 | Decorator | `infrastructure/caching.py`, `CachedPlanTripService` | Caching as a separate, composable concern |
+| Single-flight | `application/singleflight.py` | Concurrent cache misses make one upstream call, which keeps the one-call budget under load |
 | Virtual Proxy | `LazyStationIndex` | Lazy index build, with a rebuild when the dataset version changes |
 | Repository | `infrastructure/repositories.py` | The use case sees domain objects, never ORM rows |
 | DTO + Presenter | `api/serializers.py`, `api/presenters.py` | The wire format evolves independently of the domain |

@@ -37,7 +37,7 @@ A trip plan is a pure computation with no server-side state change, but its inpu
 - **Output DTO / Presenter:** `present_trip(plan)` builds the JSON:
   - rounding: miles to 0.1, money to cents, price to $0.001;
   - GeoJSON `Feature<LineString>` in `[lng, lat]` order, per RFC 7946;
-  - simplification with Douglas–Peucker at about 100 m.
+  - the geometry arrives already simplified by the use case (ADR-0012), so presenting a cached plan costs about 0.3 ms.
   - The domain has no knowledge of JSON.
 
 ### Response shape (stable keys)

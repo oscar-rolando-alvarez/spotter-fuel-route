@@ -6,12 +6,13 @@ This document is the map. The **why** behind each decision lives in the [ADRs](a
 
 | # | Quality attribute | Target | How it is met | Evidence |
 |---|---|---|---|---|
-| Q1 | **Performance** | < 100 ms local compute; total dominated by a single routing call | Offline geocoding, in-memory grid index, O(n·U) DP, plan and route caches | `meta.timings_ms`: corridor 20–60 ms, optimize 10–22 ms; cached ≈ 2 ms |
+| Q1 | **Performance** | < 100 ms local compute; total dominated by a single routing call | Offline geocoding, in-memory grid index, O(n·U) DP, plan and route caches, display geometry precomputed once per route | `meta.timings_ms`: corridor 20–60 ms, optimize 10–22 ms; cache hit + present 0.31 ms. [Load test](load-test-report.md): 2,277 RPS warm and 489 RPS at p95 160 ms mixed, per 8-worker node |
 | Q2 | **Frugal external usage** | 1 routing call per trip (≤ 3 worst case) | Gazetteer resolver chain; route cache | `meta.external_api_calls`; API tests assert 1, then 0 |
 | Q3 | **Correctness** | Never run dry; optimal for the stated objective | Exact DP; greedy oracle; feasibility replay | 47 optimizer tests incl. 25 random routes |
 | Q4 | **Modifiability** | Swap router, index or storage without touching the core | Hexagonal ports + composition root | `test_architecture.py`; use case runs on fakes |
 | Q5 | **Data freshness** | No stale prices after a reload, across processes | Dataset version namespacing + version-aware index proxy | `test_reloading_prices_invalidates_cached_plans` |
 | Q6 | **Operability** | Clear errors and observability | One error model; per-request timings and call counts | 400/422/502 tests; `meta` |
+| Q7 | **Scalability and resilience** | Correct under spikes; no stampede on upstream | Stateless workers, single-flight caches, edge load shedding (ADR-0012) | 0 wrong answers in ~356k validated requests; 2,000-user spike served at 553 RPS |
 
 ## 2. C4 level 1: system context
 
@@ -126,6 +127,7 @@ sequenceDiagram
     I-->>P: 202 CorridorHits (mile marker, offset)
     P->>O: plan(candidates, 1002.7 mi, vehicle, 50 gal)
     O-->>P: FuelPlan (2 purchases)
+    P->>P: display geometry (Douglas–Peucker, memoized per route)
     P->>DB: details(ids) (1 query)
     P-->>CP: TripPlan (+timings, calls=1)
     CP-->>V: TripPlan (cached)
@@ -144,6 +146,8 @@ A repeated request stops at step 5 with a cache hit, about 2 ms and 0 external c
 | **Strategy** + **registry/factory** | `domain/optimizer.py` (`DynamicProgrammingStrategy`, `GreedyStrategy`, `STRATEGIES`, `make_strategy`) | Interchangeable objectives; `?strategy=` at runtime | `if algo == ...` branches in the use case |
 | **Chain of Responsibility** | `infrastructure/geocoding.py::GeocoderChain` | Cheapest resolver first; network last; add resolvers without edits | Monolithic `resolve()` with nested ifs |
 | **Decorator** | `CachedRoutingProvider`, `CachedGeocoder`, `CachedPlanTripService` | Caching as a separate, composable concern with the same interface | Cache logic inside adapters / views |
+| **Single-flight** | `application/singleflight.py` (in `CachedRoutingProvider`, `CachedPlanTripService`) | Concurrent misses make one upstream call or computation, so there is no cache stampede | Distributed Redis lock (ADR-0012 upgrade path) |
+| **Memoization (bounded LRU)** | `_DisplayGeometry` in `plan_trip.py` | Simplify each route once, not per plan or per response | Simplifying in the presenter (37 ms per response) |
 | **Virtual Proxy** | `LazyStationIndex` | Defer the expensive index build; rebuild transparently on a new dataset version | Build at import (slow commands); restart on reload |
 | **Repository** | `DjangoStationRepository` | Use case sees domain objects, not ORM models | QuerySets leaking into the core |
 | **Value Object** / **Aggregate** | `domain/model.py` (frozen, slotted dataclasses; `TripPlan`) | Immutability ⇒ safe caching & concurrency; one consistent result object | Mutable dicts |
@@ -194,3 +198,5 @@ erDiagram
 | Sparse West Coast data in the CSV | LA→Seattle is infeasible (422) | Clear 422 with the gap in miles | Data issue: a fuller price feed |
 | Per-process LocMem cache | Lower hit rate with N workers | Version namespacing is already multi-worker safe | Redis (settings only) |
 | No hours-of-service model | Plans ignore driver breaks | Documented | Extend the DP state or use MILP (ADR-0006) |
+| Head-of-line blocking at saturation | `/health` and 4xx queue behind compute (~800 ms at 500 users) | Capacity knee documented (~490 RPS per node) | Edge load shedding, probe isolation, autoscaling (ADR-0012) |
+| Cross-worker stampede | Up to 1 OSRM call per worker on a cold burst | Per-process single-flight | Redis lock once Redis is in place |

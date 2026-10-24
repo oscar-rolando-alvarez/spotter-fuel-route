@@ -47,7 +47,7 @@
    > "This is a uniform grid of quarter-degree cells. The route is resampled every mile, and each station gets its mile marker along the route. That's about 50 ms coast to coast, with no PostGIS needed. PostGIS would just be another adapter."
 6. **`docs/adr/` and `tests/test_architecture.py`** (30 s):
    > "Every significant decision has an ADR in MADR format, with the options considered, the consequences, and when to revisit it. The architecture is enforced, not just documented: this test parses the imports and fails CI if the domain imports Django or the application imports infrastructure. On top of that, the DP is checked against the greedy oracle on 25 random routes, and every plan is replayed so the tank never goes negative."
-   Show `uv run pytest`: **92 passed in under a second.**
+   Show `uv run pytest`: **93 passed in under a second.** If there is time, mention the load test: about 2,300 RPS cached, about 490 RPS at p95 160 ms on a realistic mix, and 0 wrong answers in about 356k validated requests (`docs/load-test-report.md`).
 
 ## 4:20 – 5:00 · Wrap-up
 

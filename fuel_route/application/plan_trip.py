@@ -9,11 +9,14 @@ Dependencies are injected by the composition root (fuel_route/container.py).
 
 import hashlib
 import json
+import threading
 import time
+from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 
-from fuel_route.domain.model import Candidate, FuelStop, TripPlan, Vehicle
+from fuel_route.domain.geo import simplify
+from fuel_route.domain.model import Candidate, FuelStop, Route, TripPlan, Vehicle
 from fuel_route.domain.ports import (
     Cache,
     CorridorFinder,
@@ -24,6 +27,38 @@ from fuel_route.domain.ports import (
 )
 
 from .metering import metered
+from .singleflight import SingleFlight
+
+# ~100 m. The plan keeps only this display geometry: simplifying a 35k-vertex route costs
+# ~37 ms, so it is done once per computed plan, never per response (see load-test report).
+DISPLAY_TOLERANCE_DEG = 0.001
+
+
+class _DisplayGeometry:
+    """Memoizes route simplification per route (it depends on nothing else).
+
+    Under load, many plans share a route (different fuel or penalty, same trip); without
+    this, simplification was ~40% of the compute path. Small bounded LRU, thread-safe.
+    """
+
+    def __init__(self, maxsize: int = 512):
+        self._items: OrderedDict[tuple, Route] = OrderedDict()
+        self._maxsize = maxsize
+        self._lock = threading.Lock()
+
+    def __call__(self, route: Route) -> Route:
+        c = route.coordinates
+        key = (c[0], c[-1], len(c), route.distance_miles) if c else ()
+        with self._lock:
+            if (hit := self._items.get(key)) is not None:
+                self._items.move_to_end(key)
+                return hit
+        display = replace(route, coordinates=tuple(simplify(c, DISPLAY_TOLERANCE_DEG)))
+        with self._lock:
+            self._items[key] = display
+            if len(self._items) > self._maxsize:
+                self._items.popitem(last=False)
+        return display
 
 
 @dataclass(frozen=True)
@@ -71,6 +106,7 @@ class PlanTripService:
         self._vehicle = vehicle
         self._corridor_miles = corridor_miles
         self._default_stop_penalty = default_stop_penalty
+        self._display = _DisplayGeometry()
 
     def execute(self, cmd: PlanTripCommand) -> TripPlan:
         vehicle = self._vehicle
@@ -102,10 +138,13 @@ class PlanTripService:
                 FuelStop(n, p, offsets[p.candidate.key], details[p.candidate.key])
                 for n, p in enumerate(fuel.purchases, start=1)
             ]
+            # Full resolution was only needed for the corridor search; keep the light version.
+            display_route = self._display(route)
+            clock.lap("simplify")
             return TripPlan(
                 start=start,
                 finish=finish,
-                route=route,
+                route=display_route,
                 vehicle=vehicle,
                 start_fuel_gallons=start_fuel,
                 strategy=strategy.name,
@@ -126,6 +165,7 @@ class CachedPlanTripService:
     def __init__(self, inner: PlanTripService, cache: Cache, ttl_seconds: int, dataset_version: Callable[[], str]):
         self._inner, self._cache, self._ttl = inner, cache, ttl_seconds
         self._dataset_version = dataset_version
+        self._flight = SingleFlight()
 
     def execute(self, cmd: PlanTripCommand) -> TripPlan:
         normalized = {k: v.strip().lower() if isinstance(v, str) else v for k, v in asdict(cmd).items()}
@@ -134,8 +174,21 @@ class CachedPlanTripService:
         key = "plan:" + hashlib.sha1(raw.encode()).hexdigest()
         t0 = time.perf_counter()
         if (hit := self._cache.get(key)) is not None:
-            elapsed = round((time.perf_counter() - t0) * 1000, 1)
-            return replace(hit, cache_hit=True, external_api_calls=0, elapsed_ms=elapsed, timings_ms={})
-        plan = self._inner.execute(cmd)
-        self._cache.set(key, plan, self._ttl)
-        return plan
+            return self._as_hit(hit, t0)
+
+        computed: list[TripPlan] = []
+
+        def compute() -> TripPlan:
+            plan = self._inner.execute(cmd)
+            self._cache.set(key, plan, self._ttl)
+            computed.append(plan)
+            return plan
+
+        # Concurrent identical misses wait for one computation instead of stampeding.
+        plan = self._flight.do(key, lambda: self._cache.get(key), compute)
+        return plan if computed else self._as_hit(plan, t0)
+
+    @staticmethod
+    def _as_hit(plan: TripPlan, t0: float) -> TripPlan:
+        elapsed = round((time.perf_counter() - t0) * 1000, 1)
+        return replace(plan, cache_hit=True, external_api_calls=0, elapsed_ms=elapsed, timings_ms={})

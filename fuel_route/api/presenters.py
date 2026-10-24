@@ -4,15 +4,12 @@ Keeping this separate from the domain lets the wire format evolve (versioning,
 rounding, GeoJSON shape) without touching the use case.
 """
 
-from fuel_route.domain.geo import simplify
 from fuel_route.domain.model import Location, TripPlan
-
-# ~100 m; keeps the returned polyline to a few thousand points for a coast-to-coast trip.
-GEOMETRY_TOLERANCE_DEG = 0.001
 
 
 def present_trip(plan: TripPlan) -> dict:
-    line = [[lng, lat] for lat, lng in simplify(plan.route.coordinates, GEOMETRY_TOLERANCE_DEG)]
+    # Already simplified by the use case (display resolution); only reorder to GeoJSON [lng, lat].
+    line = [[lng, lat] for lat, lng in plan.route.coordinates]
     return {
         "start": _location(plan.start),
         "finish": _location(plan.finish),

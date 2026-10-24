@@ -6,6 +6,7 @@ cached from uncached and caching policy stays out of the adapters and the use ca
 
 import hashlib
 
+from fuel_route.application.singleflight import SingleFlight
 from fuel_route.domain.model import LatLng, Location, Route
 from fuel_route.domain.ports import Cache, Geocoder, RoutingProvider
 
@@ -20,15 +21,21 @@ def _key(prefix: str, raw: str) -> str:
 class CachedRoutingProvider:
     def __init__(self, inner: RoutingProvider, cache: Cache, ttl_seconds: int):
         self._inner, self._cache, self._ttl = inner, cache, ttl_seconds
+        self._flight = SingleFlight()
 
     def route(self, start: LatLng, finish: LatLng) -> Route:
         # 5 decimals ≈ 1 m: identical inputs share a route, distinct places never collide.
         key = _key("route", f"{start[0]:.5f},{start[1]:.5f};{finish[0]:.5f},{finish[1]:.5f}")
-        if (hit := self._cache.get(key, _MISS)) is not _MISS:
+        if (hit := self._cache.get(key)) is not None:
             return hit
-        route = self._inner.route(start, finish)
-        self._cache.set(key, route, self._ttl)
-        return route
+
+        def fetch() -> Route:
+            route = self._inner.route(start, finish)
+            self._cache.set(key, route, self._ttl)
+            return route
+
+        # One upstream call per key even when many requests miss at the same moment.
+        return self._flight.do(key, lambda: self._cache.get(key), fetch)
 
 
 class CachedGeocoder:

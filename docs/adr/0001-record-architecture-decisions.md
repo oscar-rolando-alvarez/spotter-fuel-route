@@ -51,3 +51,4 @@ This service makes several decisions that are not obvious from the code, and tha
 | [0009](0009-api-contract-and-error-model.md) | API contract, presenter and single error model | Accepted |
 | [0010](0010-testing-strategy.md) | Testing strategy: fakes at the ports, oracle and property tests, fitness functions | Accepted |
 | [0011](0011-persistence-and-deployment-topology.md) | SQLite with stateless workers now, and the evolution path | Accepted |
+| [0012](0012-performance-under-load.md) | Performance under load: precomputed display geometry, single-flight, edge load shedding | Accepted |
