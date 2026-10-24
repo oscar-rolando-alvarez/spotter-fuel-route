@@ -39,21 +39,23 @@
     </ol>
   {% else %}
     <h1 class="error">Could not plan this trip</h1>
-    <pre>{{ plan|pprint }}</pre>
+    <p><code>{{ plan.error }}</code></p>
+    <p>{{ plan.detail }}</p>
   {% endif %}
 </aside>
 {{ plan|json_script:"plan" }}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script>
   const plan = JSON.parse(document.getElementById("plan").textContent);
-  const map = L.map("map").setView([39.5, -98.35], 4);
+  const map = L.map("map");
+  if (!plan.route) map.setView([39.5, -98.35], 4);
   // Esri basemap: keyless, and (unlike tile.openstreetmap.org) doesn't block localhost/no-Referer clients.
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}", {
     maxZoom: 19, attribution: "Tiles &copy; Esri &mdash; Esri, HERE, Garmin, USGS, NGA, EPA, USDA, NPS"
   }).addTo(map);
   if (plan.route) {
     const line = L.geoJSON(plan.route, { style: { color: "#2563eb", weight: 5 } }).addTo(map);
-    map.fitBounds(line.getBounds(), { padding: [24, 24] });
+    map.fitBounds(line.getBounds(), { padding: [24, 24], animate: false });
     L.marker([plan.start.lat, plan.start.lng]).addTo(map).bindPopup("Start: " + plan.start.label);
     L.marker([plan.finish.lat, plan.finish.lng]).addTo(map).bindPopup("Finish: " + plan.finish.label);
     for (const s of plan.fuel_stops) {
