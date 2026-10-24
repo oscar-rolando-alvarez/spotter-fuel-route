@@ -65,6 +65,7 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "UNAUTHENTICATED_USER": None,
+    "EXCEPTION_HANDLER": "fuel_route.api.errors.exception_handler",
 }
 
 FUEL_ROUTE = {
@@ -81,6 +82,8 @@ FUEL_ROUTE = {
     # Free-text addresses fall back to Nominatim; "City, ST" and "lat,lng" never do.
     "GEOCODER_FALLBACK": env_bool("GEOCODER_FALLBACK", True),
     "HTTP_TIMEOUT_SECONDS": 15,
+    # Routes, geocodes and plans are deterministic for the same inputs and price file.
+    "CACHE_TTL_SECONDS": int(os.environ.get("CACHE_TTL_SECONDS", 60 * 60 * 24)),
     "USER_AGENT": "spotter-fuel-route/0.1",
 }
 

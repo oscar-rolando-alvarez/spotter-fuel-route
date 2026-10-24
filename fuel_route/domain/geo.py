@@ -3,8 +3,9 @@
 import math
 from collections.abc import Sequence
 
+from .model import LatLng
+
 EARTH_RADIUS_MILES = 3958.8
-LatLng = tuple[float, float]
 
 # Rough boxes for CONUS, Alaska and Hawaii; good enough to reject "Paris, France".
 _US_BOXES = (

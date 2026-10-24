@@ -227,6 +227,55 @@
       ]
     },
     {
+      "name": "Strategy: greedy (pure cheapest)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "type": "text/javascript",
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const b = pm.response.json();",
+              "pm.test('at most one external API call', () => pm.expect(b.meta.external_api_calls).to.be.at.most(1));",
+              "pm.test('has route geometry and cost', () => { pm.expect(b.route.geometry.type).to.eql('LineString'); pm.expect(b.summary.total_fuel_cost).to.be.a('number'); });",
+              "pm.test('no leg exceeds 500 mi', () => { let prev = 0; for (const s of b.fuel_stops) { pm.expect(s.route_mile - prev).to.be.at.most(500.5); prev = s.route_mile; } pm.expect(b.summary.distance_miles - prev).to.be.at.most(500.5); });",
+              "console.log(`$${b.summary.total_fuel_cost} | ${b.summary.fuel_stops} stops | ${b.meta.elapsed_ms} ms | cache_hit=${b.meta.cache_hit}`);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "description": "Same trip with the textbook greedy strategy: cheapest fuel, many more stops. Compare with the default DP.",
+        "url": {
+          "raw": "{{baseUrl}}/api/v1/route-plan/?start=Buffalo, NY&finish=San Diego, CA&strategy=greedy",
+          "host": [
+            "{{baseUrl}}"
+          ],
+          "path": [
+            "api",
+            "v1",
+            "route-plan",
+            ""
+          ],
+          "query": [
+            {
+              "key": "start",
+              "value": "Buffalo, NY"
+            },
+            {
+              "key": "finish",
+              "value": "San Diego, CA"
+            },
+            {
+              "key": "strategy",
+              "value": "greedy"
+            }
+          ]
+        }
+      }
+    },
+    {
       "name": "Coordinates input + half tank (Dallas → Chicago)",
       "request": {
         "method": "GET",

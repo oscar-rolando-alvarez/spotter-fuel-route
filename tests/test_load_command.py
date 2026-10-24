@@ -2,7 +2,7 @@ import gzip
 
 from django.core.management import call_command
 
-from fuel_route.models import FuelStation, Place
+from fuel_route.models import FuelDataset, FuelStation, Place
 
 CSV = """OPIS Truckstop ID,Truckstop Name,Address,City,State,Rack ID,Retail Price
 7,WOODSHED OF BIG CABIN,"I-44, EXIT 283 & US-69",Big Cabin,OK,307,3.00733333
@@ -11,6 +11,7 @@ CSV = """OPIS Truckstop ID,Truckstop Name,Address,City,State,Rack ID,Retail Pric
 11,FLYING J,"I-75",Ruther Glen,VA,1,3.5
 12,CANADIAN STOP,"HWY 1",Calgary,AB,1,1.5
 13,UNKNOWN PLACE,"",Nowhereville,TX,1,3.0
+14,BAD PRICE,"",Big Cabin,OK,1,N/A
 """
 
 
@@ -31,6 +32,10 @@ def test_load_fuel_data(tmp_path, db):
     assert str(tomah.price) == "3.1990"  # lowest of the duplicate rows
     assert tomah.city == "Tomah" and tomah.lat == 43.98
 
+    assert FuelDataset.objects.get().stations == 3
+    first_version = FuelDataset.objects.get().version
+
     # Idempotent.
     call_command("load_fuel_data", csv=prices, places=places, overrides=overrides)
     assert FuelStation.objects.count() == 3
+    assert FuelDataset.objects.get().version == first_version  # same file, same version

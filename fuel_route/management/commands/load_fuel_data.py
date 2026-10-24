@@ -8,6 +8,7 @@ makes no network calls; the per-request path never geocodes stations.
 
 import csv
 import gzip
+import hashlib
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -15,9 +16,8 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from fuel_route.models import FuelStation, Place
-from fuel_route.services.names import US_STATES, place_key
-from fuel_route.services.station_index import reset_station_index
+from fuel_route.infrastructure.names import US_STATES, place_key
+from fuel_route.models import FuelDataset, FuelStation, Place
 
 
 class Command(BaseCommand):
@@ -42,7 +42,9 @@ class Command(BaseCommand):
             Place.objects.bulk_create(place_rows, batch_size=5000)
             FuelStation.objects.all().delete()
             FuelStation.objects.bulk_create(stations, batch_size=2000)
-        reset_station_index()
+            # Bumping the version is what makes running web workers pick up the new data.
+            version = hashlib.sha256(csv.read_bytes()).hexdigest()
+            FuelDataset.objects.update_or_create(pk=1, defaults={"version": version, "stations": len(stations)})
 
         self.stdout.write(self.style.SUCCESS(f"Loaded {len(place_rows)} places and {len(stations)} stations."))
         self.stdout.write(f"Skipped {skipped_foreign} rows outside the USA (Canadian provinces).")

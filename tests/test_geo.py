@@ -1,6 +1,6 @@
 import math
 
-from fuel_route.services.geo import cumulative_miles, haversine_miles, in_usa, resample, simplify
+from fuel_route.domain.geo import cumulative_miles, haversine_miles, in_usa, resample, simplify
 
 
 def test_haversine_known_distance():

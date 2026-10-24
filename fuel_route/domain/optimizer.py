@@ -18,44 +18,13 @@ Two solvers live here:
   ``stop_penalty=0`` reproduces the greedy optimum.
 """
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 
+from .errors import NoFeasiblePlanError, UnknownStrategyError
+from .model import Candidate, FuelPlan, Purchase, Vehicle
+
 _EPS = 1e-9
-
-
-@dataclass(frozen=True, slots=True)
-class Candidate:
-    """A station projected onto the route."""
-
-    key: int
-    mile: float
-    price: float
-
-
-@dataclass(frozen=True, slots=True)
-class Purchase:
-    candidate: Candidate
-    gallons: float
-    cost: float
-    fuel_on_arrival: float
-
-
-@dataclass(frozen=True, slots=True)
-class FuelPlan:
-    purchases: list[Purchase]
-    total_cost: float
-    gallons_purchased: float
-    gallons_consumed: float
-
-
-class UnreachableError(Exception):
-    """A gap between stations (or before the first one) exceeds the vehicle's reach."""
-
-    def __init__(self, at_mile: float, gap_miles: float):
-        self.at_mile = at_mile
-        self.gap_miles = gap_miles
-        super().__init__(f"No fuel station reachable after mile {at_mile:.0f} (gap of {gap_miles:.0f} mi)")
 
 
 def _plan(purchases: list[Purchase], total_miles: float, mpg: float) -> FuelPlan:
@@ -106,7 +75,7 @@ def plan_fuel_stops(
         d = m - pos
         arrive = depart[d:] + [inf] * d
         if min(arrive) == inf:
-            raise UnreachableError(float(pos), float(d))
+            raise NoFeasiblePlanError(float(pos), float(d))
         unit = st.price / mpg
         out = arrive[:]
         topped_from = [-1] * (cap + 1)
@@ -125,7 +94,7 @@ def plan_fuel_stops(
 
     need = dest - pos
     if need > cap or min(depart[need:]) == inf:
-        raise UnreachableError(float(pos), float(need))
+        raise NoFeasiblePlanError(float(pos), float(need))
     level = min(range(need, cap + 1), key=lambda g: (depart[g], g))
 
     # Walk back: departure level at i -> arrival level at i -> departure level at i-1.
@@ -157,7 +126,7 @@ def greedy_plan(
     if fuel * mpg + _EPS >= total_miles:
         return _plan([], total_miles, mpg)
     if not stations or stations[0].mile > fuel * mpg + _EPS:
-        raise UnreachableError(0.0, stations[0].mile if stations else total_miles)
+        raise NoFeasiblePlanError(0.0, stations[0].mile if stations else total_miles)
 
     purchases: list[Purchase] = []
     pos, i, n = 0.0, 0, len(stations)
@@ -184,7 +153,7 @@ def greedy_plan(
         elif cheapest is not None:
             target, nxt = reach, cheapest
         else:
-            raise UnreachableError(pos, (stations[i + 1].mile if i + 1 < n else total_miles) - pos)
+            raise NoFeasiblePlanError(pos, (stations[i + 1].mile if i + 1 < n else total_miles) - pos)
 
         buy = max(0.0, min((target - pos) / mpg, capacity) - fuel)
         if buy > _EPS:
@@ -193,3 +162,58 @@ def greedy_plan(
         if nxt is None:
             return _plan(purchases, total_miles, mpg)
         i = nxt
+
+
+# --- Strategy pattern -------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DynamicProgrammingStrategy:
+    """Production default: cost + per-stop penalty, exact at 1-mile resolution."""
+
+    stop_penalty: float = 0.0
+    name: str = "dp"
+
+    def plan(
+        self, candidates: Sequence[Candidate], total_miles: float, vehicle: Vehicle, start_fuel_gallons: float
+    ) -> FuelPlan:
+        return plan_fuel_stops(
+            candidates,
+            total_miles,
+            range_miles=vehicle.range_miles,
+            mpg=vehicle.mpg,
+            start_fuel_gallons=start_fuel_gallons,
+            stop_penalty=self.stop_penalty,
+        )
+
+
+@dataclass(frozen=True)
+class GreedyStrategy:
+    """Pure cheapest fuel (ignores stop count). Kept selectable for comparison/demo."""
+
+    name: str = "greedy"
+
+    def plan(
+        self, candidates: Sequence[Candidate], total_miles: float, vehicle: Vehicle, start_fuel_gallons: float
+    ) -> FuelPlan:
+        return greedy_plan(
+            candidates,
+            total_miles,
+            range_miles=vehicle.range_miles,
+            mpg=vehicle.mpg,
+            start_fuel_gallons=start_fuel_gallons,
+        )
+
+
+# Registry + factory: maps the public ``strategy`` request value to a constructor.
+STRATEGIES: dict[str, Callable[[float], DynamicProgrammingStrategy | GreedyStrategy]] = {
+    "dp": lambda stop_penalty: DynamicProgrammingStrategy(stop_penalty=stop_penalty),
+    "greedy": lambda _stop_penalty: GreedyStrategy(),
+}
+
+
+def make_strategy(name: str, stop_penalty: float) -> DynamicProgrammingStrategy | GreedyStrategy:
+    try:
+        return STRATEGIES[name](stop_penalty)
+    except KeyError:
+        raise UnknownStrategyError(f"Unknown strategy {name!r}; choose one of {sorted(STRATEGIES)}") from None

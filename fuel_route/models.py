@@ -39,3 +39,19 @@ class FuelStation(models.Model):
 
     def __str__(self) -> str:
         return f"{self.name} ({self.city}, {self.state}) ${self.price}"
+
+
+class FuelDataset(models.Model):
+    """Singleton row identifying the loaded price file (ADR-0007).
+
+    Web processes compare ``version`` to rebuild their in-memory index and to namespace
+    cached plans, so reloading prices in another process (the management command) takes
+    effect everywhere without restarts or cache flushes.
+    """
+
+    version = models.CharField(max_length=64, help_text="sha256 of the source CSV")
+    loaded_at = models.DateTimeField(auto_now=True)
+    stations = models.PositiveIntegerField()
+
+    def __str__(self) -> str:
+        return f"{self.version[:12]} ({self.stations} stations, {self.loaded_at:%Y-%m-%d %H:%M})"

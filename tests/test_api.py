@@ -14,7 +14,7 @@ def fake_osrm():
     resp = mock.Mock(status_code=200)
     resp.json.return_value = osrm_payload(LINE, 636)
     resp.raise_for_status.return_value = None
-    with mock.patch("fuel_route.services.http.session") as session:
+    with mock.patch("fuel_route.infrastructure.http.session") as session:
         session.return_value.get.return_value = resp
         yield session.return_value.get
 
@@ -77,7 +77,7 @@ def test_empty_tank_without_station_at_origin_is_422(client, corridor_data, fake
 
 
 def test_upstream_failure_is_502(client, corridor_data):
-    with mock.patch("fuel_route.services.http.session") as session:
+    with mock.patch("fuel_route.infrastructure.http.session") as session:
         session.return_value.get.side_effect = requests.ConnectionError("down")
         r = client.get(URL, {"start": "Westtown, NE", "finish": "Easttown, IL"})
     assert r.status_code == 502
@@ -93,3 +93,23 @@ def test_map_view_renders(client, corridor_data, fake_osrm):
 
 def test_health(client, corridor_data):
     assert client.get("/api/v1/health/").json() == {"status": "ok", "stations": 5, "indexed": 5}
+
+
+def test_strategy_param_selects_algorithm(client, corridor_data, fake_osrm):
+    r = client.get(URL, {"start": "Westtown, NE", "finish": "Easttown, IL", "strategy": "greedy"})
+    assert r.status_code == 200
+    assert r.json()["optimizer"] == {"algorithm": "greedy", "stop_penalty_usd": 0.0}
+    r = client.get(URL, {"start": "Westtown, NE", "finish": "Easttown, IL", "strategy": "magic"})
+    assert r.status_code == 400 and r.json()["error"] == "invalid_request"
+
+
+def test_reloading_prices_invalidates_cached_plans(client, corridor_data, fake_osrm):
+    from fuel_route.models import FuelDataset, FuelStation
+
+    params = {"start": "Westtown, NE", "finish": "Easttown, IL"}
+    assert client.get(URL, params).json()["fuel_stops"][0]["price_per_gallon"] == 2.9
+    FuelStation.objects.filter(opis_id=2).update(price=2.5)
+    FuelDataset.objects.create(pk=1, version="new-file", stations=5)  # what load_fuel_data does
+    again = client.get(URL, params).json()
+    assert again["meta"]["cache_hit"] is False
+    assert again["fuel_stops"][0]["price_per_gallon"] == 2.5

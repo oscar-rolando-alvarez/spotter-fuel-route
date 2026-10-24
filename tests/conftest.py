@@ -1,17 +1,17 @@
 import pytest
 from django.core.cache import cache
 
+from fuel_route import container
 from fuel_route.models import FuelStation, Place
-from fuel_route.services.station_index import reset_station_index
 
 
 @pytest.fixture(autouse=True)
 def _isolate_caches():
     cache.clear()
-    reset_station_index()
+    container.reset()
     yield
     cache.clear()
-    reset_station_index()
+    container.reset()
 
 
 def osrm_payload(coords_latlng, miles):

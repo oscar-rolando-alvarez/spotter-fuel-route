@@ -18,7 +18,7 @@ import requests
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
-from fuel_route.services.names import US_STATES, place_key  # noqa: E402
+from fuel_route.infrastructure.names import US_STATES, place_key  # noqa: E402
 
 DATA = ROOT / "data"
 NOMINATIM = "https://nominatim.openstreetmap.org/search"

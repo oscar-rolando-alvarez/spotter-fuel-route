@@ -1,6 +1,6 @@
 import pytest
 
-from fuel_route.services.names import census_name_variants, normalize_state, place_key
+from fuel_route.infrastructure.names import census_name_variants, normalize_state, place_key
 
 
 @pytest.mark.parametrize(

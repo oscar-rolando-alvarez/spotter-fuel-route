@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from fuel_route.services.names import census_name_variants, place_key  # noqa: E402
+from fuel_route.infrastructure.names import census_name_variants, place_key  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[1] / "data" / "us_places.csv.gz"
 

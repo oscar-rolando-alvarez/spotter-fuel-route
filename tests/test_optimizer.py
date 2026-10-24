@@ -3,7 +3,15 @@ import random
 
 import pytest
 
-from fuel_route.services.optimizer import Candidate, UnreachableError, greedy_plan, plan_fuel_stops
+from fuel_route.domain.errors import NoFeasiblePlanError, UnknownStrategyError
+from fuel_route.domain.model import Candidate, Vehicle
+from fuel_route.domain.optimizer import (
+    DynamicProgrammingStrategy,
+    GreedyStrategy,
+    greedy_plan,
+    make_strategy,
+    plan_fuel_stops,
+)
 
 VEHICLE = {"range_miles": 500, "mpg": 10}
 
@@ -61,9 +69,9 @@ def test_fills_up_at_cheapest_when_nothing_cheaper_in_range(solver):
 
 @pytest.mark.parametrize("solver", [plan_fuel_stops, greedy_plan])
 def test_unreachable_gap_raises(solver):
-    with pytest.raises(UnreachableError):
+    with pytest.raises(NoFeasiblePlanError):
         solve([Candidate(1, 300, 3.0), Candidate(2, 900, 3.0)], 1200, solver=solver)
-    with pytest.raises(UnreachableError):
+    with pytest.raises(NoFeasiblePlanError):
         solve([Candidate(1, 600, 3.0)], 800, solver=solver)  # first station out of reach
 
 
@@ -109,3 +117,18 @@ def test_dp_is_fast_on_coast_to_coast_sized_input():
     t = time.perf_counter()
     solve(cands, total)
     assert time.perf_counter() - t < 0.5
+
+
+def test_strategy_registry_builds_configured_strategies():
+    dp = make_strategy("dp", 7.5)
+    assert isinstance(dp, DynamicProgrammingStrategy) and dp.stop_penalty == 7.5
+    assert isinstance(make_strategy("greedy", 7.5), GreedyStrategy)
+    with pytest.raises(UnknownStrategyError):
+        make_strategy("simulated-annealing", 0)
+
+
+def test_strategies_are_interchangeable_behind_the_port():
+    cands, total = random_route(random.Random(3))
+    vehicle = Vehicle(range_miles=500, mpg=10)
+    plans = {s.name: s.plan(cands, total, vehicle, 50) for s in (GreedyStrategy(), DynamicProgrammingStrategy(0))}
+    assert abs(plans["dp"].total_cost - plans["greedy"].total_cost) < 5
