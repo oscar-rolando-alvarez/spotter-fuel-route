@@ -112,7 +112,7 @@ sequenceDiagram
 
     C->>V: GET /api/v1/route-plan/?start=Chicago, IL&finish=Denver, CO
     V->>S: validate → PlanTripCommand
-    V-->>V: ETag(version, command, settings, host); If-None-Match matches → 304, stop here
+    V-->>V: ETag of version, command, settings, host. If-None-Match matches: 304, stop here
     V->>CP: execute(cmd)
     CP->>DB: dataset_version()
     CP-->>CP: cache miss (key = version + command)
